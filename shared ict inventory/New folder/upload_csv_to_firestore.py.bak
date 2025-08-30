@@ -1,0 +1,130 @@
+
+import firebase_admin
+from firebase_admin import credentials, fire            try:
+                # Add to batch
+                doc_ref = collection_ref.document()
+                batch.set(doc_ref, clean_record)
+                
+                # Commit the batch
+                print(f"Committing batch of {len(chunk)} records...")
+                batch.commit()
+                total_uploaded += len(chunk)
+                print(f"Successfully uploaded {total_uploaded}/{len(records)} records")
+            except Exception as e:
+                print(f"Error uploading batch: {e}")
+                import traceback
+                print(traceback.format_exc())
+                return Falsemport pandas as pd
+import os
+import json
+import sys
+
+
+
+def init_firestore():
+    """Initialize Firestore with emulator settings"""
+    # Set Firestore emulator host
+    os.environ["FIRESTORE_EMULATOR_HOST"] = "localhost:8174"
+    
+    try:
+        print("Attempting to initialize Firebase app...")
+        if not firebase_admin._apps:
+            firebase_admin.initialize_app()
+        print("Firebase app initialized, getting Firestore client...")
+        db = firestore.client()
+        print("Firestore client obtained successfully")
+        return db
+    except Exception as e:
+        print(f"Error initializing Firestore: {e}")
+        print("Make sure the Firebase emulator is running!")
+        import traceback
+        print(traceback.format_exc())
+        sys.exit(1)
+
+def upload_csv_to_firestore(csv_path, collection_name='ict_inventory'):
+    """Upload CSV data to Firestore"""
+    try:
+        # Read CSV file
+        print(f"Reading CSV file: {csv_path}")
+        df = pd.read_csv(csv_path)
+        print(f"Found {len(df)} rows in CSV")
+        print("Initializing Firestore connection...")
+
+        # Initialize Firestore
+        db = init_firestore()
+        if not db:
+            print("Failed to initialize Firestore connection!")
+            return False
+        print("Firestore connection established")
+        
+        collection_ref = db.collection(collection_name)
+        print("Converting data to Firestore format...")
+        
+        # Convert DataFrame to list of dictionaries
+        records = df.to_dict(orient='records')
+        
+        # Upload each record
+        batch_size = 500  # Firestore has a limit of 500 operations per batch
+        total_uploaded = 0
+        
+        for i in range(0, len(records), batch_size):
+            try:
+                batch = db.batch()
+                chunk = records[i:i + batch_size]
+                
+                for record in chunk:
+                    # Clean the data: convert NaN to None and ensure all values are JSON serializable
+                    clean_record = {}
+                    for key, value in record.items():
+                        if pd.isna(value):
+                            clean_record[key] = None
+                        else:
+                            clean_record[key] = value
+                    
+                    # Add to batch
+                    doc_ref = collection_ref.document()
+                    batch.set(doc_ref, clean_record)
+                
+                # Commit the batch
+                print(f"Committing batch of {len(chunk)} records...")
+                batch.commit()
+                total_uploaded += len(chunk)
+                print(f"Successfully uploaded {total_uploaded}/{len(records)} records")
+            except Exception as e:
+                print(f"Error uploading batch: {e}")
+                import traceback
+                print(traceback.format_exc())
+                return False
+            # Force a small delay to avoid overwhelming the emulator
+            import time
+            time.sleep(0.1)
+
+        print("\nUpload complete!")
+        print(f"Total records uploaded: {total_uploaded}")
+        
+        # Verify the upload
+        all_docs = collection_ref.stream()
+        doc_count = sum(1 for _ in all_docs)
+        print(f"\nVerification: {doc_count} documents found in Firestore collection")
+        
+        if doc_count == len(records):
+            print("✓ Upload verified successfully!")
+        else:
+            print("⚠ Warning: Number of documents in Firestore doesn't match CSV record count")
+            print(f"CSV records: {len(records)}, Firestore documents: {doc_count}")
+        
+    except FileNotFoundError:
+        print(f"Error: CSV file '{csv_path}' not found!")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error during upload: {str(e)}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    CSV_FILE = "ICT Inventory.csv"
+    if not os.path.exists(CSV_FILE):
+        print(f"Error: {CSV_FILE} not found in the current directory!")
+        print("Make sure the CSV file is in the same directory as this script.")
+        sys.exit(1)
+    
+    upload_csv_to_firestore(CSV_FILE)
